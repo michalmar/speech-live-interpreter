@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import queue
 import sys
 import threading
 import time
@@ -21,6 +22,9 @@ from urllib.parse import urlsplit, urlunsplit
 
 PERSONAL_VOICE = "personal-voice"
 UNIVERSAL_V2_PATH = "/stt/speech/universal/v2"
+OUTPUT_CHANNELS = 1
+OUTPUT_SAMPLE_WIDTH = 2
+OUTPUT_SAMPLE_RATE = 16000
 DEFAULT_TARGET_LANGUAGE = "fr"
 DEFAULT_PREBUILT_VOICES = {
     "fr": "fr-FR-DeniseNeural",
@@ -383,11 +387,15 @@ def create_translation_components(
     translation_config.voice_name = config.voice_name
     output_format = getattr(
         getattr(speechsdk, "SpeechSynthesisOutputFormat", None),
-        "Riff16Khz16BitMonoPcm",
+        "Raw16Khz16BitMonoPcm",
         None,
     )
-    if output_format is not None:
-        translation_config.set_speech_synthesis_output_format(output_format)
+    if output_format is None:
+        raise ConfigurationError(
+            "The installed Speech SDK does not support raw 16-kHz PCM synthesis; "
+            "upgrade azure-cognitiveservices-speech."
+        )
+    translation_config.set_speech_synthesis_output_format(output_format)
 
     # In Python, omitting both constructor arguments selects open-range
     # detection; the static FromOpenRange method exists only in other SDKs.
@@ -458,11 +466,10 @@ def format_recognized_event(event: Any, speechsdk: Any) -> str:
 
 
 class AudioCollector:
-    """Collect synthesizing event bytes and save/play a valid WAV at session end."""
+    """Collect synthesizing event bytes and save a valid WAV at session end."""
 
-    def __init__(self, output_wav: Path | None, play_audio: bool) -> None:
+    def __init__(self, output_wav: Path | None) -> None:
         self.output_wav = output_wav
-        self.play_audio = play_audio
         self._chunks: list[bytes] = []
 
     def add(self, audio: bytes) -> None:
@@ -477,8 +484,78 @@ class AudioCollector:
             self.output_wav.parent.mkdir(parents=True, exist_ok=True)
             self.output_wav.write_bytes(wav_bytes)
             print(f"AUDIO: wrote {self.output_wav}")
-        if self.play_audio:
-            _play_wav(wav_bytes)
+
+
+class LiveAudioPlayer:
+    """Play synthesized PCM chunks in order without blocking SDK callbacks."""
+
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+        self._error: Exception | None = None
+        self._queue: queue.Queue[bytes | None] = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._stream: Any | None = None
+        self._sounddevice: Any | None = None
+        if not enabled:
+            return
+        try:
+            import sounddevice
+        except ImportError as exc:
+            raise ConfigurationError(
+                "Live audio playback requires sounddevice. "
+                "Run: python3 -m pip install -r requirements.txt"
+            ) from exc
+        self._sounddevice = sounddevice
+        try:
+            self._stream = sounddevice.RawOutputStream(
+                samplerate=OUTPUT_SAMPLE_RATE,
+                channels=OUTPUT_CHANNELS,
+                dtype="int16",
+            )
+            self._stream.start()
+        except (OSError, RuntimeError, ValueError, sounddevice.PortAudioError) as exc:
+            raise ConfigurationError(
+                f"Unable to open the default audio output device: {exc}"
+            ) from exc
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def add(self, audio: bytes) -> None:
+        if self.enabled and audio:
+            self._queue.put(bytes(audio))
+
+    def finish(self) -> None:
+        if self._thread is None:
+            return
+        self._queue.put(None)
+        self._thread.join()
+        try:
+            self._stream.stop()
+            self._stream.close()
+        except (
+            AttributeError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            self._sounddevice.PortAudioError,
+        ) as exc:
+            if self._error is None:
+                self._error = exc
+        if self._error is not None:
+            raise SessionError(f"Live audio playback failed: {self._error}")
+
+    def _run(self) -> None:
+        try:
+            while (audio := self._queue.get()) is not None:
+                self._stream.write(audio)
+        except (
+            AttributeError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            self._sounddevice.PortAudioError,
+        ) as exc:
+            self._error = exc
 
 
 def _as_wav(chunks: list[bytes]) -> bytes:
@@ -507,7 +584,12 @@ def _as_wav(chunks: list[bytes]) -> bytes:
     audio = b"".join(chunks)
     if audio.startswith(b"RIFF") and b"WAVE" in audio[:16]:
         return audio
-    return _make_wav(audio, 1, 2, 16000)
+    return _make_wav(
+        audio,
+        OUTPUT_CHANNELS,
+        OUTPUT_SAMPLE_WIDTH,
+        OUTPUT_SAMPLE_RATE,
+    )
 
 
 def _make_wav(audio: bytes, channels: int, sample_width: int, rate: int) -> bytes:
@@ -520,29 +602,6 @@ def _make_wav(audio: bytes, channels: int, sample_width: int, rate: int) -> byte
         wav_file.setframerate(rate)
         wav_file.writeframes(audio)
     return stream.getvalue()
-
-
-def _play_wav(wav_bytes: bytes) -> None:
-    try:
-        import simpleaudio
-    except ImportError:
-        print("AUDIO: local playback unavailable (install simpleaudio to enable it).")
-        return
-    try:
-        import io
-
-        with wave.open(io.BytesIO(wav_bytes), "rb") as wav_file:
-            wave_obj = simpleaudio.WaveObject(
-                wav_file.readframes(wav_file.getnframes()),
-                wav_file.getnchannels(),
-                wav_file.getsampwidth(),
-                wav_file.getframerate(),
-            )
-        wave_obj.play().wait_done()
-    except AttributeError:
-        print("AUDIO: installed simpleaudio does not support in-memory playback.")
-    except (OSError, RuntimeError) as exc:
-        print(f"AUDIO: local playback failed: {exc}")
 
 
 def run_session(
@@ -569,7 +628,8 @@ def run_session(
         )
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise SessionError(f"Unable to configure Speech session: {exc}") from exc
-    collector = AudioCollector(config.output_wav, config.play_audio)
+    collector = AudioCollector(config.output_wav)
+    player = LiveAudioPlayer(config.play_audio)
     stopped = threading.Event()
     canceled = {"message": None}
 
@@ -583,6 +643,7 @@ def run_session(
         audio = bytes(getattr(event.result, "audio", b"") or b"")
         if audio:
             collector.add(audio)
+            player.add(audio)
         print(f"SYNTHESIZING: {len(audio)} byte(s)")
 
     def on_canceled(event: Any) -> None:
@@ -625,10 +686,17 @@ def run_session(
             recognizer.stop_continuous_recognition()
         except (OSError, RuntimeError, ValueError) as exc:
             raise SessionError(f"Unable to stop Speech session: {exc}") from exc
+        finish_errors = []
         try:
             collector.finish()
         except (OSError, ValueError, wave.Error) as exc:
-            raise SessionError(f"Unable to write or play synthesized audio: {exc}") from exc
+            finish_errors.append(f"Unable to write synthesized audio: {exc}")
+        try:
+            player.finish()
+        except SessionError as exc:
+            finish_errors.append(str(exc))
+        if finish_errors:
+            raise SessionError("; ".join(finish_errors))
     if canceled["message"]:
         raise SessionError(canceled["message"])
 

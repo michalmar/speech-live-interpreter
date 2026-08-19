@@ -97,7 +97,7 @@ def fake_sdk():
             NoMatch="nomatch",
         ),
         SpeechSynthesisOutputFormat=types.SimpleNamespace(
-            Riff16Khz16BitMonoPcm="riff"
+            Raw16Khz16BitMonoPcm="raw"
         ),
     )
 
@@ -336,7 +336,7 @@ class SampleCodeTests(unittest.TestCase):
         self.assertEqual(translation.kwargs["endpoint"], config.endpoint)
         self.assertEqual(translation.target_languages, ["de"])
         self.assertEqual(translation.voice_name, "de-DE-KatjaNeural")
-        self.assertEqual(translation.output_format, "riff")
+        self.assertEqual(translation.output_format, "raw")
         self.assertIsInstance(auto_detect, FakeAutoDetect)
         self.assertEqual(FakeAutoDetect.calls, 1)
 
@@ -524,7 +524,7 @@ class SampleCodeTests(unittest.TestCase):
     def test_audio_collector_writes_pcm_wav(self):
         with tempfile.TemporaryDirectory() as directory:
             output_path = Path(directory) / "translated.wav"
-            collector = sample_code.AudioCollector(output_path, play_audio=False)
+            collector = sample_code.AudioCollector(output_path)
             collector.add(b"\x00\x00" * 8)
             collector.finish()
             with wave.open(str(output_path), "rb") as wav_file:
@@ -532,6 +532,35 @@ class SampleCodeTests(unittest.TestCase):
                 self.assertEqual(wav_file.getsampwidth(), 2)
                 self.assertEqual(wav_file.getframerate(), 16000)
                 self.assertEqual(wav_file.getnframes(), 8)
+
+    def test_live_audio_player_plays_chunks_in_order(self):
+        played = []
+
+        class FakePortAudioError(Exception):
+            pass
+
+        class FakeOutputStream:
+            def start(self):
+                pass
+
+            def write(self, audio):
+                played.append(audio)
+
+            def stop(self):
+                pass
+
+            def close(self):
+                pass
+
+        sounddevice = types.ModuleType("sounddevice")
+        sounddevice.PortAudioError = FakePortAudioError
+        sounddevice.RawOutputStream = lambda **_: FakeOutputStream()
+        with mock.patch.dict(sys.modules, {"sounddevice": sounddevice}):
+            player = sample_code.LiveAudioPlayer(enabled=True)
+            player.add(b"first")
+            player.add(b"second")
+            player.finish()
+        self.assertEqual(played, [b"first", b"second"])
 
 
 if __name__ == "__main__":

@@ -2,7 +2,8 @@
 
 This Python CLI translates microphone or WAV speech with Azure Speech Live
 Interpreter. It prints interim and final translations, can play synthesized
-audio, and can save the translated audio as a WAV file.
+audio through the default speaker as it arrives, and can save the translated
+audio as a WAV file.
 
 ## Prerequisites
 
@@ -93,6 +94,8 @@ python3 sample_code.py --voice personal-voice
 
 `personal-voice` requires Personal Voice access on the exact Speech resource.
 Targets without a listed default require `--voice` or `AZURE_SPEECH_VOICE`.
+Audio plays through the default output device while the session is running.
+Use headphones to prevent translated speech from feeding back into the microphone.
 
 Use a PCM WAV file and save the translated audio:
 
