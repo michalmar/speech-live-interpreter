@@ -65,12 +65,16 @@ class FakeConfig:
         self.kwargs = kwargs
         self.target_languages = []
         self.voice_name = ""
+        self.properties = {}
 
     def add_target_language(self, language):
         self.target_languages.append(language)
 
     def set_speech_synthesis_output_format(self, output_format):
         self.output_format = output_format
+
+    def set_property(self, property_id, value):
+        self.properties[property_id] = value
 
 
 class FakeAutoDetect:
@@ -98,6 +102,9 @@ def fake_sdk():
         ),
         SpeechSynthesisOutputFormat=types.SimpleNamespace(
             Raw16Khz16BitMonoPcm="raw"
+        ),
+        PropertyId=types.SimpleNamespace(
+            SpeechServiceConnection_SynthLanguage="synth-language"
         ),
     )
 
@@ -151,8 +158,8 @@ class SampleCodeTests(unittest.TestCase):
             "fr-FR": "fr-FR-DeniseNeural",
             "en": "en-US-JennyNeural",
             "en-US": "en-US-JennyNeural",
-            "cs": "cs-CZ-VlastaNeural",
-            "cz": "cs-CZ-VlastaNeural",
+            "cs": "en-US-Ava:DragonHDLatestNeural",
+            "cz": "en-US-Ava:DragonHDLatestNeural",
         }
         for target_language, expected_voice in expected_voices.items():
             with self.subTest(target_language=target_language):
@@ -171,6 +178,10 @@ class SampleCodeTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(sample_code.ConfigurationError, "Set --voice"):
             sample_code.resolve_voice_name("de")
+
+    def test_czech_target_alias_uses_azure_language_code(self):
+        self.assertEqual(sample_code.normalize_target_language("cz"), "cs")
+        self.assertEqual(sample_code.normalize_target_language("cs"), "cs")
 
     def test_config_requires_key_and_validates_wav(self):
         args = argparse.Namespace(
@@ -323,8 +334,8 @@ class SampleCodeTests(unittest.TestCase):
         config = sample_code.AppConfig(
             key="not-printed",
             endpoint="wss://demo.cognitiveservices.azure.com/stt/speech/universal/v2",
-            target_language="de",
-            voice_name="de-DE-KatjaNeural",
+            target_language="cs",
+            voice_name="en-US-Ava:DragonHDLatestNeural",
             input_wav=None,
             output_wav=None,
             timeout_seconds=1,
@@ -334,8 +345,11 @@ class SampleCodeTests(unittest.TestCase):
         translation, auto_detect = sample_code.create_translation_components(config, sdk)
         self.assertEqual(translation.kwargs["subscription"], "not-printed")
         self.assertEqual(translation.kwargs["endpoint"], config.endpoint)
-        self.assertEqual(translation.target_languages, ["de"])
-        self.assertEqual(translation.voice_name, "de-DE-KatjaNeural")
+        self.assertEqual(translation.target_languages, ["cs"])
+        self.assertEqual(
+            translation.voice_name, "en-US-Ava:DragonHDLatestNeural"
+        )
+        self.assertEqual(translation.properties["synth-language"], "cs-CZ")
         self.assertEqual(translation.output_format, "raw")
         self.assertIsInstance(auto_detect, FakeAutoDetect)
         self.assertEqual(FakeAutoDetect.calls, 1)

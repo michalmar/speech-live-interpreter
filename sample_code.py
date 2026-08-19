@@ -29,8 +29,13 @@ DEFAULT_TARGET_LANGUAGE = "fr"
 DEFAULT_PREBUILT_VOICES = {
     "fr": "fr-FR-DeniseNeural",
     "en": "en-US-JennyNeural",
-    "cs": "cs-CZ-VlastaNeural",
-    "cz": "cs-CZ-VlastaNeural",
+    "cs": "en-US-Ava:DragonHDLatestNeural",
+    "cz": "en-US-Ava:DragonHDLatestNeural",
+}
+SYNTHESIS_LOCALES = {
+    "fr": "fr-FR",
+    "en": "en-US",
+    "cs": "cs-CZ",
 }
 DEFAULT_TIMEOUT_SECONDS = 120.0
 DEFAULT_ENV_FILE = Path(".env")
@@ -150,6 +155,13 @@ def resolve_voice_name(target_language: str, requested_voice: str | None = None)
             f"No default prebuilt voice for target language {target_language!r}. "
             f"Set --voice or AZURE_SPEECH_VOICE. Default languages: {supported}."
         ) from exc
+
+
+def normalize_target_language(target_language: str) -> str:
+    """Normalize common aliases to Azure speech-translation language codes."""
+
+    language = target_language.strip()
+    return "cs" if language.lower() == "cz" else language
 
 
 def load_env_file(path: Path, required: bool = False) -> bool:
@@ -294,7 +306,7 @@ def load_config(args: argparse.Namespace, environ: dict[str, str] | None = None)
             'Set it to the target Azure CLI profile directory and verify '
             "that Azure CLI is logged in."
         )
-    target_language = str(args.target_language or "").strip()
+    target_language = normalize_target_language(str(args.target_language or ""))
     if not target_language:
         raise ConfigurationError("A target language is required.")
     voice_name = resolve_voice_name(target_language, getattr(args, "voice", None))
@@ -385,6 +397,13 @@ def create_translation_components(
     translation_config = speechsdk.translation.SpeechTranslationConfig(**sdk_kwargs)
     translation_config.add_target_language(config.target_language)
     translation_config.voice_name = config.voice_name
+    language = config.target_language.lower().split("-", 1)[0]
+    synthesis_locale = SYNTHESIS_LOCALES.get(language)
+    if synthesis_locale is not None:
+        translation_config.set_property(
+            speechsdk.PropertyId.SpeechServiceConnection_SynthLanguage,
+            synthesis_locale,
+        )
     output_format = getattr(
         getattr(speechsdk, "SpeechSynthesisOutputFormat", None),
         "Raw16Khz16BitMonoPcm",

@@ -82,7 +82,7 @@ Prebuilt neural voices are selected by default:
 | --- | --- |
 | `fr` | `fr-FR-DeniseNeural` |
 | `en` | `en-US-JennyNeural` |
-| `cs` or `cz` | `cs-CZ-VlastaNeural` |
+| `cs` or `cz` | `en-US-Ava:DragonHDLatestNeural` with `cs-CZ` language skill |
 
 Choose another prebuilt voice with `--voice`, or explicitly enable the restricted
 Personal Voice mode:
