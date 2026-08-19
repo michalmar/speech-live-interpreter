@@ -145,9 +145,37 @@ class SampleCodeTests(unittest.TestCase):
                 args, {"AZURE_SPEECH_KEY": "secret", "AZURE_CONFIG_DIR": "/profile"}
             )
 
+    def test_default_prebuilt_voices_follow_target_language(self):
+        expected_voices = {
+            "fr": "fr-FR-DeniseNeural",
+            "fr-FR": "fr-FR-DeniseNeural",
+            "en": "en-US-JennyNeural",
+            "en-US": "en-US-JennyNeural",
+            "cs": "cs-CZ-VlastaNeural",
+            "cz": "cs-CZ-VlastaNeural",
+        }
+        for target_language, expected_voice in expected_voices.items():
+            with self.subTest(target_language=target_language):
+                self.assertEqual(
+                    sample_code.resolve_voice_name(target_language), expected_voice
+                )
+
+    def test_voice_can_be_explicitly_selected(self):
+        self.assertEqual(
+            sample_code.resolve_voice_name("fr", sample_code.PERSONAL_VOICE),
+            sample_code.PERSONAL_VOICE,
+        )
+        self.assertEqual(
+            sample_code.resolve_voice_name("de", "de-DE-KatjaNeural"),
+            "de-DE-KatjaNeural",
+        )
+        with self.assertRaisesRegex(sample_code.ConfigurationError, "Set --voice"):
+            sample_code.resolve_voice_name("de")
+
     def test_config_requires_key_and_validates_wav(self):
         args = argparse.Namespace(
             target_language="fr",
+            voice=None,
             resource_name="demo",
             endpoint=None,
             input_wav=None,
@@ -200,6 +228,7 @@ class SampleCodeTests(unittest.TestCase):
             {
                 "AZURE_SPEECH_RESOURCE_NAME": "demo",
                 "AZURE_SPEECH_TARGET_LANGUAGE": "de",
+                "AZURE_SPEECH_VOICE": "de-DE-KatjaNeural",
                 "AZURE_SPEECH_TIMEOUT": "15",
                 "AZURE_SPEECH_AUTH_MODE": "azure-cli",
             },
@@ -208,6 +237,7 @@ class SampleCodeTests(unittest.TestCase):
             args = sample_code.parse_args(["--no-env-file"])
         self.assertEqual(args.resource_name, "demo")
         self.assertEqual(args.target_language, "de")
+        self.assertEqual(args.voice, "de-DE-KatjaNeural")
         self.assertEqual(args.timeout, 15.0)
         self.assertEqual(args.auth_mode, "azure-cli")
 
@@ -240,6 +270,7 @@ class SampleCodeTests(unittest.TestCase):
                         "AZURE_SPEECH_AUTH_MODE=azure-cli",
                         "AZURE_SPEECH_RESOURCE_NAME=customer-speech",
                         "AZURE_SPEECH_TARGET_LANGUAGE=de",
+                        "AZURE_SPEECH_VOICE=de-DE-KatjaNeural",
                         "AZURE_SPEECH_INPUT_WAV=",
                         "AZURE_SPEECH_OUTPUT_WAV=",
                     )
@@ -253,6 +284,7 @@ class SampleCodeTests(unittest.TestCase):
         self.assertEqual(config.subscription_id, "customer-subscription")
         self.assertEqual(config.auth_mode, "azure-cli")
         self.assertEqual(config.target_language, "de")
+        self.assertEqual(config.voice_name, "de-DE-KatjaNeural")
         self.assertIsNone(config.input_wav)
         self.assertIsNone(config.output_wav)
         self.assertEqual(
@@ -292,6 +324,7 @@ class SampleCodeTests(unittest.TestCase):
             key="not-printed",
             endpoint="wss://demo.cognitiveservices.azure.com/stt/speech/universal/v2",
             target_language="de",
+            voice_name="de-DE-KatjaNeural",
             input_wav=None,
             output_wav=None,
             timeout_seconds=1,
@@ -302,7 +335,7 @@ class SampleCodeTests(unittest.TestCase):
         self.assertEqual(translation.kwargs["subscription"], "not-printed")
         self.assertEqual(translation.kwargs["endpoint"], config.endpoint)
         self.assertEqual(translation.target_languages, ["de"])
-        self.assertEqual(translation.voice_name, sample_code.PERSONAL_VOICE)
+        self.assertEqual(translation.voice_name, "de-DE-KatjaNeural")
         self.assertEqual(translation.output_format, "riff")
         self.assertIsInstance(auto_detect, FakeAutoDetect)
         self.assertEqual(FakeAutoDetect.calls, 1)
@@ -313,6 +346,7 @@ class SampleCodeTests(unittest.TestCase):
             key=None,
             endpoint="wss://demo.cognitiveservices.azure.com/stt/speech/universal/v2",
             target_language="de",
+            voice_name="de-DE-KatjaNeural",
             input_wav=None,
             output_wav=None,
             timeout_seconds=1,
@@ -425,6 +459,7 @@ class SampleCodeTests(unittest.TestCase):
             key="secret",
             endpoint="wss://demo.cognitiveservices.azure.com/stt/speech/universal/v2",
             target_language="fr",
+            voice_name="fr-FR-DeniseNeural",
             input_wav=None,
             output_wav=None,
             timeout_seconds=1,
@@ -452,6 +487,7 @@ class SampleCodeTests(unittest.TestCase):
             key="secret",
             endpoint="wss://demo.cognitiveservices.azure.com/stt/speech/universal/v2",
             target_language="fr",
+            voice_name="fr-FR-DeniseNeural",
             input_wav=None,
             output_wav=None,
             timeout_seconds=1,
@@ -476,6 +512,7 @@ class SampleCodeTests(unittest.TestCase):
             key="secret",
             endpoint="wss://demo.cognitiveservices.azure.com/stt/speech/universal/v2",
             target_language="fr",
+            voice_name="fr-FR-DeniseNeural",
             input_wav=None,
             output_wav=None,
             timeout_seconds=1,

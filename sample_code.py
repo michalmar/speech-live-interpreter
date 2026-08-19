@@ -22,6 +22,12 @@ from urllib.parse import urlsplit, urlunsplit
 PERSONAL_VOICE = "personal-voice"
 UNIVERSAL_V2_PATH = "/stt/speech/universal/v2"
 DEFAULT_TARGET_LANGUAGE = "fr"
+DEFAULT_PREBUILT_VOICES = {
+    "fr": "fr-FR-DeniseNeural",
+    "en": "en-US-JennyNeural",
+    "cs": "cs-CZ-VlastaNeural",
+    "cz": "cs-CZ-VlastaNeural",
+}
 DEFAULT_TIMEOUT_SECONDS = 120.0
 DEFAULT_ENV_FILE = Path(".env")
 AUTH_MODES = ("auto", "azure-cli", "key")
@@ -40,6 +46,7 @@ class AppConfig:
     key: str | None
     endpoint: str
     target_language: str
+    voice_name: str
     input_wav: Path | None
     output_wav: Path | None
     timeout_seconds: float
@@ -124,6 +131,23 @@ def _optional_path_from_env(name: str) -> Path | None:
     return _optional_path(os.getenv(name))
 
 
+def resolve_voice_name(target_language: str, requested_voice: str | None = None) -> str:
+    """Return an explicit voice or the prebuilt default for the target language."""
+
+    voice_name = (requested_voice or "").strip()
+    if voice_name:
+        return voice_name
+    language = target_language.strip().lower().split("-", 1)[0]
+    try:
+        return DEFAULT_PREBUILT_VOICES[language]
+    except KeyError as exc:
+        supported = ", ".join(sorted({"fr", "en", "cs"}))
+        raise ConfigurationError(
+            f"No default prebuilt voice for target language {target_language!r}. "
+            f"Set --voice or AZURE_SPEECH_VOICE. Default languages: {supported}."
+        ) from exc
+
+
 def load_env_file(path: Path, required: bool = False) -> bool:
     """Load a dotenv file without overriding variables already in the process."""
 
@@ -204,7 +228,15 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--target-language",
         default=os.getenv("AZURE_SPEECH_TARGET_LANGUAGE", DEFAULT_TARGET_LANGUAGE),
-        help="Target language code, such as fr or de (or AZURE_SPEECH_TARGET_LANGUAGE).",
+        help="Target language code, such as fr, en, or cs (or AZURE_SPEECH_TARGET_LANGUAGE).",
+    )
+    parser.add_argument(
+        "--voice",
+        default=os.getenv("AZURE_SPEECH_VOICE"),
+        help=(
+            "Speech synthesis voice (or AZURE_SPEECH_VOICE). Defaults to a prebuilt "
+            "voice for fr, en, or cs. Use 'personal-voice' explicitly for Personal Voice."
+        ),
     )
     parser.add_argument(
         "--wav",
@@ -261,6 +293,7 @@ def load_config(args: argparse.Namespace, environ: dict[str, str] | None = None)
     target_language = str(args.target_language or "").strip()
     if not target_language:
         raise ConfigurationError("A target language is required.")
+    voice_name = resolve_voice_name(target_language, getattr(args, "voice", None))
     timeout_seconds = _positive_timeout(args.timeout)
     input_wav = _optional_path(args.input_wav)
     if input_wav is not None:
@@ -272,6 +305,7 @@ def load_config(args: argparse.Namespace, environ: dict[str, str] | None = None)
         key=key or None,
         endpoint=build_universal_v2_endpoint(args.resource_name, args.endpoint),
         target_language=target_language,
+        voice_name=voice_name,
         input_wav=input_wav,
         output_wav=_optional_path(args.output_wav),
         timeout_seconds=timeout_seconds,
@@ -346,7 +380,7 @@ def create_translation_components(
         raise ConfigurationError(f"Invalid authentication mode {auth_mode!r}; choose {valid_modes}.")
     translation_config = speechsdk.translation.SpeechTranslationConfig(**sdk_kwargs)
     translation_config.add_target_language(config.target_language)
-    translation_config.voice_name = PERSONAL_VOICE
+    translation_config.voice_name = config.voice_name
     output_format = getattr(
         getattr(speechsdk, "SpeechSynthesisOutputFormat", None),
         "Riff16Khz16BitMonoPcm",
@@ -570,7 +604,7 @@ def run_session(
     recognizer.session_started.connect(on_session_started)
     recognizer.session_stopped.connect(on_session_stopped)
 
-    print(f"OUTPUT: {config.target_language}; voice={PERSONAL_VOICE}")
+    print(f"OUTPUT: {config.target_language}; voice={config.voice_name}")
     print("SESSION: starting (Ctrl+C to stop)")
     try:
         recognizer.start_continuous_recognition()

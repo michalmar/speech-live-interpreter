@@ -42,7 +42,8 @@ Set these values in `.env`:
 | `AZURE_SPEECH_ENDPOINT` | Optional custom endpoint instead of the resource name. |
 | `AZURE_SPEECH_AUTH_MODE` | `azure-cli`, `key`, or `auto`. |
 | `AZURE_SPEECH_KEY` | Required only for `key` mode. Never commit this value. |
-| `AZURE_SPEECH_TARGET_LANGUAGE` | Translation target, such as `fr` or `de`. |
+| `AZURE_SPEECH_TARGET_LANGUAGE` | Translation target, such as `fr`, `en`, or `cs`. |
+| `AZURE_SPEECH_VOICE` | Optional voice name. Defaults to a matching prebuilt voice for French, English, or Czech. Set to `personal-voice` only when explicitly required. |
 
 Process environment variables take precedence over values from the dotenv file.
 CLI options take precedence over both.
@@ -73,6 +74,25 @@ Use a different customer or tenant configuration:
 ```bash
 python3 sample_code.py --env-file /path/to/customer.env
 ```
+
+Prebuilt neural voices are selected by default:
+
+| Target language | Default voice |
+| --- | --- |
+| `fr` | `fr-FR-DeniseNeural` |
+| `en` | `en-US-JennyNeural` |
+| `cs` or `cz` | `cs-CZ-VlastaNeural` |
+
+Choose another prebuilt voice with `--voice`, or explicitly enable the restricted
+Personal Voice mode:
+
+```bash
+python3 sample_code.py --target-language de --voice de-DE-KatjaNeural
+python3 sample_code.py --voice personal-voice
+```
+
+`personal-voice` requires Personal Voice access on the exact Speech resource.
+Targets without a listed default require `--voice` or `AZURE_SPEECH_VOICE`.
 
 Use a PCM WAV file and save the translated audio:
 
