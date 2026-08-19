@@ -211,6 +211,23 @@ class SampleCodeTests(unittest.TestCase):
         self.assertEqual(args.timeout, 15.0)
         self.assertEqual(args.auth_mode, "azure-cli")
 
+    def test_empty_cli_wav_paths_select_microphone_without_output_file(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            args = sample_code.parse_args(
+                [
+                    "--no-env-file",
+                    "--resource-name",
+                    "demo",
+                    "--wav",
+                    "",
+                    "--output-wav",
+                    "",
+                ]
+            )
+        config = sample_code.load_config(args, {"AZURE_CONFIG_DIR": "/profile"})
+        self.assertIsNone(config.input_wav)
+        self.assertIsNone(config.output_wav)
+
     def test_dotenv_loads_tenant_subscription_and_resource(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / "customer.env"
@@ -223,6 +240,8 @@ class SampleCodeTests(unittest.TestCase):
                         "AZURE_SPEECH_AUTH_MODE=azure-cli",
                         "AZURE_SPEECH_RESOURCE_NAME=customer-speech",
                         "AZURE_SPEECH_TARGET_LANGUAGE=de",
+                        "AZURE_SPEECH_INPUT_WAV=",
+                        "AZURE_SPEECH_OUTPUT_WAV=",
                     )
                 ),
                 encoding="utf-8",
@@ -234,6 +253,8 @@ class SampleCodeTests(unittest.TestCase):
         self.assertEqual(config.subscription_id, "customer-subscription")
         self.assertEqual(config.auth_mode, "azure-cli")
         self.assertEqual(config.target_language, "de")
+        self.assertIsNone(config.input_wav)
+        self.assertIsNone(config.output_wav)
         self.assertEqual(
             config.endpoint,
             "wss://customer-speech.cognitiveservices.azure.com"
@@ -325,10 +346,19 @@ class SampleCodeTests(unittest.TestCase):
                 "customer-subscription",
             )
         self.assertIs(result, credential)
-        constructor.assert_called_once_with(
-            tenant_id="customer-tenant",
-            subscription="customer-subscription",
-        )
+        constructor.assert_called_once_with(subscription="customer-subscription")
+
+    def test_azure_cli_credential_uses_tenant_when_subscription_is_absent(self):
+        credential = object()
+        constructor = mock.Mock(return_value=credential)
+        identity_module = types.ModuleType("azure.identity")
+        identity_module.AzureCliCredential = constructor
+        with mock.patch.dict(
+            sys.modules, {"azure.identity": identity_module}
+        ), mock.patch.dict(os.environ, {"AZURE_CONFIG_DIR": "/profile"}, clear=True):
+            result = sample_code.create_azure_cli_credential("customer-tenant")
+        self.assertIs(result, credential)
+        constructor.assert_called_once_with(tenant_id="customer-tenant")
 
     def test_azure_cli_credential_constructor_errors_are_not_swallowed(self):
         constructor = mock.Mock(side_effect=RuntimeError("credential setup failed"))

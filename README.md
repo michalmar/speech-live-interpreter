@@ -56,9 +56,9 @@ AZURE_CONFIG_DIR="/path/to/azure-cli-profile" az account set --subscription "<su
 AZURE_CONFIG_DIR="/path/to/azure-cli-profile" az account show
 ```
 
-The application passes both `AZURE_TENANT_ID` and
-`AZURE_SUBSCRIPTION_ID` to `AzureCliCredential`, so it doesn't depend on an
-unrelated active tenant or subscription.
+The application routes `AzureCliCredential` through `AZURE_SUBSCRIPTION_ID`
+when provided, which also selects that subscription's tenant. It falls back to
+`AZURE_TENANT_ID` when no subscription is configured.
 
 ## Run the demo
 

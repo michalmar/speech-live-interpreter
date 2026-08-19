@@ -113,6 +113,17 @@ def _positive_timeout(value: str) -> float:
     return timeout
 
 
+def _optional_path(value: str | os.PathLike[str] | None) -> Path | None:
+    if value is None:
+        return None
+    text = os.fspath(value).strip()
+    return Path(text) if text else None
+
+
+def _optional_path_from_env(name: str) -> Path | None:
+    return _optional_path(os.getenv(name))
+
+
 def load_env_file(path: Path, required: bool = False) -> bool:
     """Load a dotenv file without overriding variables already in the process."""
 
@@ -198,14 +209,14 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--wav",
         dest="input_wav",
-        type=Path,
-        default=os.getenv("AZURE_SPEECH_INPUT_WAV"),
+        type=_optional_path,
+        default=_optional_path_from_env("AZURE_SPEECH_INPUT_WAV"),
         help="Read speech from a WAV file instead of the default microphone.",
     )
     parser.add_argument(
         "--output-wav",
-        type=Path,
-        default=os.getenv("AZURE_SPEECH_OUTPUT_WAV"),
+        type=_optional_path,
+        default=_optional_path_from_env("AZURE_SPEECH_OUTPUT_WAV"),
         help="Write synthesized translated audio to this WAV file.",
     )
     parser.add_argument(
@@ -251,7 +262,7 @@ def load_config(args: argparse.Namespace, environ: dict[str, str] | None = None)
     if not target_language:
         raise ConfigurationError("A target language is required.")
     timeout_seconds = _positive_timeout(args.timeout)
-    input_wav = Path(args.input_wav) if args.input_wav else None
+    input_wav = _optional_path(args.input_wav)
     if input_wav is not None:
         if not input_wav.is_file():
             raise ConfigurationError(f"WAV input file does not exist: {input_wav}")
@@ -262,7 +273,7 @@ def load_config(args: argparse.Namespace, environ: dict[str, str] | None = None)
         endpoint=build_universal_v2_endpoint(args.resource_name, args.endpoint),
         target_language=target_language,
         input_wav=input_wav,
-        output_wav=Path(args.output_wav) if args.output_wav else None,
+        output_wav=_optional_path(args.output_wav),
         timeout_seconds=timeout_seconds,
         play_audio=not args.no_play_audio,
         auth_mode=auth_mode,
@@ -301,10 +312,10 @@ def create_azure_cli_credential(
             "Run: python3 -m pip install -r requirements.txt"
         ) from exc
     credential_options = {}
-    if tenant_id:
-        credential_options["tenant_id"] = tenant_id
     if subscription_id:
         credential_options["subscription"] = subscription_id
+    elif tenant_id:
+        credential_options["tenant_id"] = tenant_id
     return AzureCliCredential(**credential_options)
 
 
